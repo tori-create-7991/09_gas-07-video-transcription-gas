@@ -275,28 +275,81 @@ function getExistingFileIds(sheet) {
 // ============================================================
 
 /**
- * 新規ファイルをスキャン
+ * 新規ファイルをスキャン（ショートカット対応）
  */
 function scanNewFiles() {
   const config = getConfig();
   const sheet = getFilesSheet();
   const folder = DriveApp.getFolderById(config.WATCH_FOLDER_ID);
-  const files = folder.getFilesByType('video/mp4');
 
   const existingIds = getExistingFileIds(sheet);
+  const mp4Files = [];
+
+  // フォルダ内のMP4ファイルとショートカットを収集
+  collectMp4Files(folder, mp4Files, existingIds);
+
   let addedCount = 0;
-
-  while (files.hasNext()) {
-    const file = files.next();
-    const fileId = file.getId();
-
-    if (!existingIds.includes(fileId)) {
-      sheet.appendRow([fileId, file.getName(), STATUS.NEW, '', '', '']);
-      addedCount++;
-    }
+  for (const file of mp4Files) {
+    sheet.appendRow([file.getId(), file.getName(), STATUS.NEW, '', '', '']);
+    addedCount++;
   }
 
   SpreadsheetApp.getUi().alert(`${addedCount} 件の新規ファイルを追加しました`);
+}
+
+/**
+ * MP4ファイルを収集（ショートカット対応）
+ * @param {Folder} folder - 検索対象フォルダ
+ * @param {File[]} mp4Files - 収集したファイルを格納する配列
+ * @param {string[]} existingIds - 既存のファイルID
+ * @param {Set} visitedFolderIds - 訪問済みフォルダID（循環参照防止）
+ */
+function collectMp4Files(folder, mp4Files, existingIds, visitedFolderIds = new Set()) {
+  const folderId = folder.getId();
+
+  // 循環参照防止
+  if (visitedFolderIds.has(folderId)) return;
+  visitedFolderIds.add(folderId);
+
+  // 通常のMP4ファイルを取得
+  const files = folder.getFilesByType('video/mp4');
+  while (files.hasNext()) {
+    const file = files.next();
+    if (!existingIds.includes(file.getId())) {
+      mp4Files.push(file);
+    }
+  }
+
+  // ショートカットを処理
+  const shortcuts = folder.getFilesByType('application/vnd.google-apps.shortcut');
+  while (shortcuts.hasNext()) {
+    const shortcut = shortcuts.next();
+    try {
+      const targetId = shortcut.getTargetId();
+      if (!targetId) continue;
+
+      // ターゲットがファイルかフォルダかを判定
+      try {
+        const targetFile = DriveApp.getFileById(targetId);
+        // MP4ファイルへのショートカット
+        if (targetFile.getMimeType() === 'video/mp4' && !existingIds.includes(targetId)) {
+          mp4Files.push(targetFile);
+        }
+      } catch (e) {
+        // ファイルとして取得できない場合はフォルダとして試す
+        try {
+          const targetFolder = DriveApp.getFolderById(targetId);
+          // フォルダへのショートカット → 再帰的に検索
+          collectMp4Files(targetFolder, mp4Files, existingIds, visitedFolderIds);
+        } catch (e2) {
+          // アクセス権がない等の理由でスキップ
+          console.log(`ショートカット先にアクセスできません: ${shortcut.getName()}`);
+        }
+      }
+    } catch (e) {
+      console.log(`ショートカット処理エラー: ${shortcut.getName()} - ${e.message}`);
+    }
+  }
 }
 
 /**
