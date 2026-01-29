@@ -1,3 +1,9 @@
 node_modules/
 .clasprc.json
 .clasp.json
+
+# Docker converter media files
+docker-converter/input/*.mp4
+docker-converter/input/*.MP4
+docker-converter/output/*.m4a
+docker-converter/output/*.M4A

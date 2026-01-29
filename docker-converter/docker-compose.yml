@@ -1,0 +1,8 @@
+services:
+  converter:
+    build: .
+    volumes:
+      # 変換したいMP4ファイルを置くフォルダ
+      - ./input:/input
+      # 変換後のM4Aファイルが出力されるフォルダ
+      - ./output:/output
