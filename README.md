@@ -129,6 +129,16 @@ cat ~/.clasprc.json
 
 `.clasp.json` 内の `scriptId` の値、またはGASエディタのURLから取得。
 
+#### 組織のGoogle Workspaceを使用している場合
+
+組織のWorkspaceでは、セキュリティポリシーにより`clasp deploy`が制限されている場合があります。
+エラー「Only users in the same domain as the script owner may deploy this script」が出る場合：
+
+- GitHub Actionsでは`clasp push`（コードのアップロード）のみ実行されます
+- デプロイ（バージョン作成）はGASエディタから手動で行ってください：
+  1. [GASエディタ](https://script.google.com/)でスクリプトを開く
+  2. 「デプロイ」→「新しいデプロイ」
+
 ### 5. GAS側の設定
 
 スプレッドシートのメニュー「📹 動画文字起こし」→「⚙️ 設定を登録」から以下を設定:

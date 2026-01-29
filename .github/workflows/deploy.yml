@@ -38,6 +38,8 @@ jobs:
       - name: Push to GAS
         run: clasp push --force
 
-      - name: Deploy
-        run: |
-          clasp deploy --description "Deploy from GitHub Actions - $(date +'%Y-%m-%d %H:%M:%S')"
+      # 注意: 組織のGoogle Workspaceではデプロイ権限が制限されている場合があります
+      # その場合は以下のステップをコメントアウトし、GASエディタから手動でデプロイしてください
+      # - name: Deploy
+      #   run: |
+      #     clasp deploy --description "Deploy from GitHub Actions - $(date +'%Y-%m-%d %H:%M:%S')"
