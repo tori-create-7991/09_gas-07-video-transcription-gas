@@ -22,6 +22,19 @@ const CONFIG_KEYS = {
   OUTPUT_FOLDER_ID: 'OUTPUT_FOLDER_ID'
 };
 
+// 対応メディアファイルのMIMEタイプ
+const SUPPORTED_MIME_TYPES = [
+  'video/mp4',
+  'audio/mp4',        // m4a
+  'audio/mpeg',       // mp3
+  'audio/wav',        // wav
+  'audio/x-wav',      // wav（別形式）
+  'audio/aac',        // aac
+  'audio/ogg',        // ogg
+  'audio/webm',       // webm audio
+  'video/webm'        // webm video
+];
+
 // ============================================================
 // 設定管理
 // ============================================================
@@ -275,7 +288,7 @@ function getExistingFileIds(sheet) {
 // ============================================================
 
 /**
- * 新規ファイルをスキャン（ショートカット対応）
+ * 新規ファイルをスキャン（ショートカット対応、音声ファイル対応）
  */
 function scanNewFiles() {
   const config = getConfig();
@@ -283,13 +296,13 @@ function scanNewFiles() {
   const folder = DriveApp.getFolderById(config.WATCH_FOLDER_ID);
 
   const existingIds = getExistingFileIds(sheet);
-  const mp4Files = [];
+  const mediaFiles = [];
 
-  // フォルダ内のMP4ファイルとショートカットを収集
-  collectMp4Files(folder, mp4Files, existingIds);
+  // フォルダ内のメディアファイルとショートカットを収集
+  collectMediaFiles(folder, mediaFiles, existingIds);
 
   let addedCount = 0;
-  for (const file of mp4Files) {
+  for (const file of mediaFiles) {
     sheet.appendRow([file.getId(), file.getName(), STATUS.NEW, '', '', '']);
     addedCount++;
   }
@@ -298,25 +311,27 @@ function scanNewFiles() {
 }
 
 /**
- * MP4ファイルを収集（ショートカット対応）
+ * メディアファイルを収集（ショートカット対応）
  * @param {Folder} folder - 検索対象フォルダ
- * @param {File[]} mp4Files - 収集したファイルを格納する配列
+ * @param {File[]} mediaFiles - 収集したファイルを格納する配列
  * @param {string[]} existingIds - 既存のファイルID
  * @param {Set} visitedFolderIds - 訪問済みフォルダID（循環参照防止）
  */
-function collectMp4Files(folder, mp4Files, existingIds, visitedFolderIds = new Set()) {
+function collectMediaFiles(folder, mediaFiles, existingIds, visitedFolderIds = new Set()) {
   const folderId = folder.getId();
 
   // 循環参照防止
   if (visitedFolderIds.has(folderId)) return;
   visitedFolderIds.add(folderId);
 
-  // 通常のMP4ファイルを取得
-  const files = folder.getFilesByType('video/mp4');
-  while (files.hasNext()) {
-    const file = files.next();
-    if (!existingIds.includes(file.getId())) {
-      mp4Files.push(file);
+  // 対応する全てのメディアファイルを取得
+  for (const mimeType of SUPPORTED_MIME_TYPES) {
+    const files = folder.getFilesByType(mimeType);
+    while (files.hasNext()) {
+      const file = files.next();
+      if (!existingIds.includes(file.getId())) {
+        mediaFiles.push(file);
+      }
     }
   }
 
@@ -331,16 +346,17 @@ function collectMp4Files(folder, mp4Files, existingIds, visitedFolderIds = new S
       // ターゲットがファイルかフォルダかを判定
       try {
         const targetFile = DriveApp.getFileById(targetId);
-        // MP4ファイルへのショートカット
-        if (targetFile.getMimeType() === 'video/mp4' && !existingIds.includes(targetId)) {
-          mp4Files.push(targetFile);
+        const mimeType = targetFile.getMimeType();
+        // 対応メディアファイルへのショートカット
+        if (SUPPORTED_MIME_TYPES.includes(mimeType) && !existingIds.includes(targetId)) {
+          mediaFiles.push(targetFile);
         }
       } catch (e) {
         // ファイルとして取得できない場合はフォルダとして試す
         try {
           const targetFolder = DriveApp.getFolderById(targetId);
           // フォルダへのショートカット → 再帰的に検索
-          collectMp4Files(targetFolder, mp4Files, existingIds, visitedFolderIds);
+          collectMediaFiles(targetFolder, mediaFiles, existingIds, visitedFolderIds);
         } catch (e2) {
           // アクセス権がない等の理由でスキップ
           console.log(`ショートカット先にアクセスできません: ${shortcut.getName()}`);
@@ -451,7 +467,7 @@ function transcribeWithGemini(file, apiKey) {
         contents: [{
           parts: [
             { fileData: { mimeType: file.getMimeType(), fileUri: fileUri }},
-            { text: `この動画の音声を全て文字起こししてください。
+            { text: `このメディアファイルの音声を全て文字起こししてください。
 
 【ルール】
 - 話者が複数いる場合は「話者A:」「話者B:」と区別
