@@ -1,1 +1,123 @@
-# 09_gas-07-video-transcription-gas
+# 動画文字起こし GAS - NotebookLM連携
+
+Google Drive MP4 → Gemini API文字起こし → Googleドキュメント → NotebookLM連携のためのGoogle Apps Script
+
+## 機能
+
+- Google Drive内のMP4ファイルを自動検出
+- Gemini APIを使用した高精度な文字起こし
+- 複数話者の識別対応
+- Googleドキュメントへの自動保存
+- NotebookLMとの連携を想定した出力形式
+
+## ファイル構成
+
+```
+video-transcription-gas/
+├── src/
+│   ├── main.js           # メインコード
+│   └── appsscript.json   # GAS設定
+├── .github/workflows/
+│   └── deploy.yml        # GitHub Actions
+├── .gitignore
+├── package.json
+└── README.md
+```
+
+## セットアップ
+
+### 1. claspのインストールとログイン
+
+```bash
+# claspをグローバルインストール
+npm install -g @google/clasp
+
+# Googleアカウントでログイン（ブラウザが開きます）
+clasp login
+```
+
+### 2. GASプロジェクトの作成
+
+#### 新規作成の場合
+
+```bash
+# スプレッドシートにバインドしたGASプロジェクトを作成
+clasp create --type sheets --title "動画文字起こし" --rootDir ./src
+
+# 作成されたスプレッドシートを開く
+clasp open --webapp
+```
+
+#### 既存のGASプロジェクトに接続する場合
+
+```bash
+# .clasp.jsonを手動作成
+echo '{
+  "scriptId": "YOUR_SCRIPT_ID",
+  "rootDir": "./src"
+}' > .clasp.json
+```
+
+スクリプトIDは、GASエディタのURL `https://script.google.com/home/projects/SCRIPT_ID/edit` から取得できます。
+
+### 3. デプロイ
+
+#### ローカルからデプロイ
+
+```bash
+# コードをGASにプッシュ
+npm run push
+# または
+clasp push
+
+# プッシュしてデプロイ（バージョン作成）
+npm run deploy
+# または
+clasp push && clasp deploy
+```
+
+#### 開発用コマンド
+
+```bash
+# GASエディタを開く
+npm run open
+
+# GASからローカルにコードを取得
+npm run pull
+```
+
+### 4. GitHub Actionsでの自動デプロイ
+
+mainブランチへのpush時に自動デプロイするには、リポジトリのSecretsに以下を設定:
+
+#### CLASPRC_JSON の取得方法
+
+```bash
+# ログイン後、以下のファイルの内容をコピー
+cat ~/.clasprc.json
+```
+
+この内容をGitHub Secretsの `CLASPRC_JSON` に登録します。
+
+#### SCRIPT_ID の取得方法
+
+`.clasp.json` 内の `scriptId` の値、またはGASエディタのURLから取得。
+
+### 5. GAS側の設定
+
+スプレッドシートのメニュー「📹 動画文字起こし」→「⚙️ 設定を登録」から以下を設定:
+
+- **Gemini API Key**: [AI Studio](https://aistudio.google.com/apikey)で取得
+- **監視フォルダID**: MP4ファイルを置くGoogle DriveフォルダのID
+- **出力フォルダID**: 文字起こしドキュメントを保存するフォルダのID
+
+## 使い方
+
+1. 「📋 シート初期化」でシートを準備
+2. 監視フォルダにMP4ファイルをアップロード
+3. 「🔍 新規ファイルを検索」で検出
+4. 「▶️ 未処理を全て実行」または「▶️ 選択行を実行」で文字起こし実行
+
+## ライセンス
+
+MIT
