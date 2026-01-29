@@ -36,6 +36,20 @@ npm install -g @google/clasp
 clasp login
 ```
 
+#### GitHub Codespace / リモート環境の場合
+
+Codespaceなどのリモート環境では、通常の`clasp login`はlocalhostへの接続エラーになります。
+代わりに`--no-localhost`オプションを使用してください：
+
+```bash
+clasp login --no-localhost
+```
+
+このコマンドを実行すると：
+1. 認証用のURLが表示されます
+2. そのURLをブラウザで開いてGoogleアカウントで認証
+3. 認証後に表示される認証コードをコピーしてターミナルに貼り付け
+
 ### 2. GASプロジェクトの作成
 
 #### 新規作成の場合
