@@ -33,7 +33,7 @@ video-transcription-gas/
 npm install -g @google/clasp
 
 # Googleアカウントでログイン（ブラウザが開きます）
-clasp login
+clasp login --no-localhost
 ```
 
 ### 2. GASプロジェクトの作成
