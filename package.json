@@ -1,0 +1,23 @@
+{
+  "name": "video-transcription-gas",
+  "version": "1.0.0",
+  "description": "Google Drive MP4 → Gemini文字起こし → Google Docs → NotebookLM連携",
+  "scripts": {
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "deploy": "clasp push && clasp deploy",
+    "open": "clasp open",
+    "login": "clasp login"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2"
+  },
+  "keywords": [
+    "google-apps-script",
+    "gemini",
+    "transcription",
+    "notebooklm"
+  ],
+  "author": "",
+  "license": "MIT"
+}
