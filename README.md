@@ -36,6 +36,21 @@ npm install -g @google/clasp
 clasp login --no-localhost
 ```
 
+#### GitHub Codespace / リモート環境の場合
+
+Codespaceなどのリモート環境では、通常の`clasp login`はlocalhostへの接続エラーになります。
+代わりに`--no-localhost`オプションを使用してください：
+
+```bash
+clasp login --no-localhost
+```
+
+このコマンドを実行すると：
+1. 認証用のURLが表示されます
+2. そのURLをブラウザで開いてGoogleアカウントで認証
+3. 認証後「localhost refused to connect」エラーが表示されますが、**アドレスバーのURL全体**（`http://localhost:8888?code=...`）をコピー
+4. ターミナルに貼り付け
+
 ### 2. GASプロジェクトの作成
 
 #### 新規作成の場合
@@ -88,7 +103,18 @@ npm run pull
 
 ### 4. GitHub Actionsでの自動デプロイ
 
-mainブランチへのpush時に自動デプロイするには、リポジトリのSecretsに以下を設定:
+mainブランチへのpush時に自動デプロイするには、以下の設定が必要です。
+
+#### Apps Script API の有効化（必須）
+
+claspを使用するには、Apps Script APIを有効にする必要があります：
+
+1. [https://script.google.com/home/usersettings](https://script.google.com/home/usersettings) にアクセス
+2. 「Google Apps Script API」を**オン**にする
+
+※ GitHub Actionsで使用するアカウントでAPIを有効にしてください。
+
+#### リポジトリSecretsの設定
 
 #### CLASPRC_JSON の取得方法
 
