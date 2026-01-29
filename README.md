@@ -26,20 +26,90 @@ video-transcription-gas/
 
 ## セットアップ
 
-### 1. 必要な設定
+### 1. claspのインストールとログイン
+
+```bash
+# claspをグローバルインストール
+npm install -g @google/clasp
+
+# Googleアカウントでログイン（ブラウザが開きます）
+clasp login
+```
+
+### 2. GASプロジェクトの作成
+
+#### 新規作成の場合
+
+```bash
+# スプレッドシートにバインドしたGASプロジェクトを作成
+clasp create --type sheets --title "動画文字起こし" --rootDir ./src
+
+# 作成されたスプレッドシートを開く
+clasp open --webapp
+```
+
+#### 既存のGASプロジェクトに接続する場合
+
+```bash
+# .clasp.jsonを手動作成
+echo '{
+  "scriptId": "YOUR_SCRIPT_ID",
+  "rootDir": "./src"
+}' > .clasp.json
+```
+
+スクリプトIDは、GASエディタのURL `https://script.google.com/home/projects/SCRIPT_ID/edit` から取得できます。
+
+### 3. デプロイ
+
+#### ローカルからデプロイ
+
+```bash
+# コードをGASにプッシュ
+npm run push
+# または
+clasp push
+
+# プッシュしてデプロイ（バージョン作成）
+npm run deploy
+# または
+clasp push && clasp deploy
+```
+
+#### 開発用コマンド
+
+```bash
+# GASエディタを開く
+npm run open
+
+# GASからローカルにコードを取得
+npm run pull
+```
+
+### 4. GitHub Actionsでの自動デプロイ
+
+mainブランチへのpush時に自動デプロイするには、リポジトリのSecretsに以下を設定:
+
+#### CLASPRC_JSON の取得方法
+
+```bash
+# ログイン後、以下のファイルの内容をコピー
+cat ~/.clasprc.json
+```
+
+この内容をGitHub Secretsの `CLASPRC_JSON` に登録します。
+
+#### SCRIPT_ID の取得方法
+
+`.clasp.json` 内の `scriptId` の値、またはGASエディタのURLから取得。
+
+### 5. GAS側の設定
 
 スプレッドシートのメニュー「📹 動画文字起こし」→「⚙️ 設定を登録」から以下を設定:
 
 - **Gemini API Key**: [AI Studio](https://aistudio.google.com/apikey)で取得
 - **監視フォルダID**: MP4ファイルを置くGoogle DriveフォルダのID
 - **出力フォルダID**: 文字起こしドキュメントを保存するフォルダのID
-
-### 2. GitHub Actionsでのデプロイ
-
-リポジトリのSecretsに以下を設定:
-
-- `CLASPRC_JSON`: claspの認証情報
-- `SCRIPT_ID`: Google Apps ScriptのスクリプトID
 
 ## 使い方
 
