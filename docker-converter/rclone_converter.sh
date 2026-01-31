@@ -4,7 +4,7 @@
 # GCP設定不要！
 #
 
-set -e
+# set -e を削除（((var++))で0になるとエラーになるため）
 
 INPUT_FOLDER="${INPUT_FOLDER:-}"
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-}"
