@@ -66,7 +66,8 @@ skipped=0
 failed=0
 
 # JSONからファイル名を1つずつ取得して処理
-jq -r '.[] | select(.Name | test("\\.(mp4|MP4|mov|MOV|webm)$")) | .Name' "$FILE_LIST" | while IFS= read -r video; do
+# 文字化けしたファイル名を除外（数字8桁で始まるファイルのみ処理）
+jq -r '.[] | select(.Name | test("^[0-9]{8}.*\\.(mp4|MP4|mov|MOV|webm)$")) | .Name' "$FILE_LIST" | while IFS= read -r video; do
     [ -z "$video" ] && continue
 
     name_without_ext="${video%.*}"
