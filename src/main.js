@@ -105,6 +105,8 @@ function onOpen() {
     .addItem('▶️ 未処理を全て実行', 'processAllNew')
     .addItem('▶️ 選択行を実行', 'processSelectedRow')
     .addSeparator()
+    .addItem('📚 全ドキュメントを結合', 'combineAllDocs')
+    .addSeparator()
     .addItem('⚙️ 設定を登録', 'showConfigDialog')
     .addItem('🔍 設定を確認', 'showCurrentConfig')
     .addItem('🗑️ 設定を削除', 'clearConfig')
@@ -554,4 +556,136 @@ function saveAsGoogleDoc(originalName, transcript, outputFolderId) {
   doc.saveAndClose();
 
   return doc.getUrl();
+}
+
+// ============================================================
+// 全ドキュメント結合
+// ============================================================
+
+/**
+ * 出力フォルダ内の全ての文字起こしドキュメントを1つに結合
+ */
+function combineAllDocs() {
+  const config = getConfig();
+  const ui = SpreadsheetApp.getUi();
+  const outputFolder = DriveApp.getFolderById(config.OUTPUT_FOLDER_ID);
+
+  // 文字起こしドキュメントを収集
+  const docs = [];
+  const files = outputFolder.getFilesByType('application/vnd.google-apps.document');
+
+  while (files.hasNext()) {
+    const file = files.next();
+    const fileName = file.getName();
+    // 「_文字起こし」で終わるドキュメントのみ対象（統合ドキュメント自体は除外）
+    if (fileName.endsWith('_文字起こし')) {
+      docs.push({
+        id: file.getId(),
+        name: fileName,
+        createdDate: file.getDateCreated()
+      });
+    }
+  }
+
+  if (docs.length === 0) {
+    ui.alert('⚠️ 結合対象', '出力フォルダに文字起こしドキュメントがありません。', ui.ButtonSet.OK);
+    return;
+  }
+
+  // 作成日時でソート（古い順）
+  docs.sort((a, b) => a.createdDate - b.createdDate);
+
+  // 確認ダイアログ
+  const response = ui.alert(
+    '📚 全ドキュメント結合',
+    `${docs.length} 件の文字起こしドキュメントを結合します。\n\n結合対象:\n${docs.map(d => '・' + d.name).join('\n')}\n\n続行しますか？`,
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) {
+    return;
+  }
+
+  // 統合ドキュメントの名前（固定）
+  const combinedDocName = '📚 統合文字起こし';
+
+  // 既存の統合ドキュメントを確認
+  const existingFiles = outputFolder.getFilesByName(combinedDocName);
+  let combinedDoc;
+
+  if (existingFiles.hasNext()) {
+    // 既存ドキュメントを上書き
+    combinedDoc = DocumentApp.openById(existingFiles.next().getId());
+    combinedDoc.getBody().clear();
+  } else {
+    // 新規ドキュメント作成
+    combinedDoc = DocumentApp.create(combinedDocName);
+    DriveApp.getFileById(combinedDoc.getId()).moveTo(outputFolder);
+  }
+
+  const body = combinedDoc.getBody();
+
+  // タイトルを追加
+  body.appendParagraph('📚 統合文字起こしドキュメント')
+    .setHeading(DocumentApp.ParagraphHeading.TITLE);
+  body.appendParagraph(`作成日時: ${new Date().toLocaleString('ja-JP')}`);
+  body.appendParagraph(`結合ドキュメント数: ${docs.length} 件`);
+  body.appendParagraph('');
+
+  // 目次を作成
+  body.appendParagraph('━━━━━━━━━━ 目次 ━━━━━━━━━━')
+    .setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  for (let i = 0; i < docs.length; i++) {
+    body.appendParagraph(`${i + 1}. ${docs[i].name}`);
+  }
+  body.appendParagraph('');
+
+  // 各ドキュメントの内容を追加
+  for (let i = 0; i < docs.length; i++) {
+    const docInfo = docs[i];
+
+    // セクション区切り
+    body.appendParagraph('');
+    body.appendPageBreak();
+
+    // セクションヘッダー
+    body.appendParagraph(`━━━━━━━━━━ ${i + 1}/${docs.length} ━━━━━━━━━━`)
+      .setHeading(DocumentApp.ParagraphHeading.HEADING1);
+    body.appendParagraph(docInfo.name)
+      .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    body.appendParagraph('');
+
+    // 元ドキュメントの内容を取得して追加
+    try {
+      const sourceDoc = DocumentApp.openById(docInfo.id);
+      const sourceBody = sourceDoc.getBody();
+      const numChildren = sourceBody.getNumChildren();
+
+      for (let j = 0; j < numChildren; j++) {
+        const child = sourceBody.getChild(j);
+        const childType = child.getType();
+
+        if (childType === DocumentApp.ElementType.PARAGRAPH) {
+          const para = child.asParagraph();
+          body.appendParagraph(para.getText());
+        } else if (childType === DocumentApp.ElementType.LIST_ITEM) {
+          const listItem = child.asListItem();
+          body.appendListItem(listItem.getText());
+        } else if (childType === DocumentApp.ElementType.TABLE) {
+          // テーブルはテキストとして追加
+          body.appendParagraph('[表]');
+        }
+      }
+    } catch (e) {
+      body.appendParagraph(`❌ エラー: ${e.message}`);
+    }
+  }
+
+  combinedDoc.saveAndClose();
+
+  ui.alert(
+    '✅ 結合完了',
+    `${docs.length} 件のドキュメントを結合しました。\n\n📄 ${combinedDocName}\n\n${combinedDoc.getUrl()}`,
+    ui.ButtonSet.OK
+  );
 }
