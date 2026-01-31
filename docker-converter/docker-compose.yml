@@ -1,12 +1,45 @@
 services:
-  # ローカルファイル変換（従来の方法）
+  # ============================================================
+  # ローカルファイル変換
+  # ============================================================
   converter:
     build: .
     volumes:
       - ./input:/input
       - ./output:/output
 
-  # OAuth認証セットアップ（初回のみ実行）
+  # ============================================================
+  # rclone版（GCP不要・おすすめ）
+  # ============================================================
+
+  # rclone設定（初回のみ）
+  rclone-setup:
+    build:
+      context: .
+      dockerfile: Dockerfile.rclone
+    volumes:
+      - ./rclone-config:/root/.config/rclone
+    entrypoint: ["rclone", "config"]
+    stdin_open: true
+    tty: true
+
+  # rclone版 Drive変換
+  rclone-converter:
+    build:
+      context: .
+      dockerfile: Dockerfile.rclone
+    volumes:
+      - ./rclone-config:/root/.config/rclone
+    environment:
+      - INPUT_FOLDER=${INPUT_FOLDER}
+      - OUTPUT_FOLDER=${OUTPUT_FOLDER}
+      - REMOTE_NAME=${REMOTE_NAME:-gdrive}
+
+  # ============================================================
+  # Python版（GCP必要）
+  # ============================================================
+
+  # OAuth認証セットアップ（初回のみ）
   oauth-setup:
     build:
       context: .
@@ -17,18 +50,14 @@ services:
     stdin_open: true
     tty: true
 
-  # Google Drive連携変換
+  # Python版 Drive変換
   drive-converter:
     build:
       context: .
       dockerfile: Dockerfile.drive
     volumes:
-      # 認証ファイル（トークン更新のため読み書き可能）
       - ./credentials:/app/credentials
     environment:
-      # 動画があるDriveフォルダID
       - INPUT_FOLDER_ID=${INPUT_FOLDER_ID}
-      # M4Aを保存するDriveフォルダID
       - OUTPUT_FOLDER_ID=${OUTPUT_FOLDER_ID}
-      # 既存ファイルをスキップするか
       - SKIP_EXISTING=true

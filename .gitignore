@@ -11,3 +11,4 @@ docker-converter/output/*.M4A
 # Docker converter credentials
 docker-converter/credentials/*.json
 docker-converter/.env
+docker-converter/rclone-config/
