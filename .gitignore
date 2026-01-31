@@ -7,3 +7,8 @@ docker-converter/input/*.mp4
 docker-converter/input/*.MP4
 docker-converter/output/*.m4a
 docker-converter/output/*.M4A
+
+# Docker converter credentials
+docker-converter/credentials/*.json
+docker-converter/.env
+docker-converter/rclone-config/

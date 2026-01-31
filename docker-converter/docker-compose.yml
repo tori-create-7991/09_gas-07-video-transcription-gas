@@ -1,8 +1,63 @@
 services:
+  # ============================================================
+  # ローカルファイル変換
+  # ============================================================
   converter:
     build: .
     volumes:
-      # 変換したいMP4ファイルを置くフォルダ
       - ./input:/input
-      # 変換後のM4Aファイルが出力されるフォルダ
       - ./output:/output
+
+  # ============================================================
+  # rclone版（GCP不要・おすすめ）
+  # ============================================================
+
+  # rclone設定（初回のみ）
+  rclone-setup:
+    build:
+      context: .
+      dockerfile: Dockerfile.rclone
+    volumes:
+      - ${PWD}/rclone-config:/root/.config/rclone
+    entrypoint: ["rclone", "config"]
+    stdin_open: true
+    tty: true
+
+  # rclone版 Drive変換
+  rclone-converter:
+    build:
+      context: .
+      dockerfile: Dockerfile.rclone
+    volumes:
+      - ${PWD}/rclone-config:/root/.config/rclone
+    environment:
+      - INPUT_FOLDER=${INPUT_FOLDER}
+      - OUTPUT_FOLDER=${OUTPUT_FOLDER}
+      - REMOTE_NAME=${REMOTE_NAME:-gdrive}
+
+  # ============================================================
+  # Python版（GCP必要）
+  # ============================================================
+
+  # OAuth認証セットアップ（初回のみ）
+  oauth-setup:
+    build:
+      context: .
+      dockerfile: Dockerfile.drive
+    volumes:
+      - ./credentials:/app/credentials
+    entrypoint: ["python", "oauth_setup.py"]
+    stdin_open: true
+    tty: true
+
+  # Python版 Drive変換
+  drive-converter:
+    build:
+      context: .
+      dockerfile: Dockerfile.drive
+    volumes:
+      - ./credentials:/app/credentials
+    environment:
+      - INPUT_FOLDER_ID=${INPUT_FOLDER_ID}
+      - OUTPUT_FOLDER_ID=${OUTPUT_FOLDER_ID}
+      - SKIP_EXISTING=true

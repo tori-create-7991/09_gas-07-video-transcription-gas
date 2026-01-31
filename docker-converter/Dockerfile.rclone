@@ -1,0 +1,16 @@
+FROM alpine:3.19
+
+# rcloneとFFmpegをインストール（日本語対応）
+RUN apk add --no-cache rclone ffmpeg bash jq
+
+# 作業ディレクトリ
+WORKDIR /app
+
+# スクリプトをコピー
+COPY rclone_converter.sh /app/
+RUN chmod +x /app/rclone_converter.sh
+
+# rclone設定用ボリューム
+VOLUME ["/root/.config/rclone"]
+
+ENTRYPOINT ["/app/rclone_converter.sh"]

@@ -1,0 +1,23 @@
+FROM python:3.11-alpine
+
+# FFmpegとビルド依存関係をインストール
+RUN apk add --no-cache ffmpeg bash
+
+# 作業ディレクトリ
+WORKDIR /app
+
+# Python依存関係をインストール
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# スクリプトをコピー
+COPY drive_converter.py .
+COPY oauth_setup.py .
+
+# 認証ファイル用ボリューム
+VOLUME ["/app/credentials"]
+
+# 環境変数のデフォルト
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/credentials.json
+
+ENTRYPOINT ["python", "drive_converter.py"]
