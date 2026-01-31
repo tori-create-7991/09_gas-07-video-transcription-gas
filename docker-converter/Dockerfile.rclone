@@ -1,7 +1,12 @@
 FROM alpine:3.19
 
-# rcloneとFFmpegをインストール
-RUN apk add --no-cache rclone ffmpeg bash
+# rcloneとFFmpegをインストール（日本語対応）
+RUN apk add --no-cache rclone ffmpeg bash musl-locales musl-locales-lang
+
+# UTF-8ロケール設定
+ENV LANG=ja_JP.UTF-8
+ENV LC_ALL=ja_JP.UTF-8
+ENV MUSL_LOCPATH=/usr/share/i18n/locales/musl
 
 # 作業ディレクトリ
 WORKDIR /app

@@ -88,8 +88,16 @@ while IFS= read -r video; do
 
     # ダウンロード
     echo "   ⬇️  ダウンロード中..."
-    if ! rclone copy "${REMOTE_NAME}:${video}" "$TEMP_DIR/" --drive-root-folder-id="${INPUT_FOLDER}" --progress 2>&1 | tail -1; then
+    # ファイル名をそのまま使用（rcloneが内部でエスケープ処理）
+    if ! rclone copy "${REMOTE_NAME}:" "$TEMP_DIR/" --drive-root-folder-id="${INPUT_FOLDER}" --include "${video}" --progress 2>&1 | tail -1; then
         echo "   ❌ ダウンロード失敗"
+        ((failed++))
+        continue
+    fi
+
+    # ダウンロードされたファイルを確認
+    if [ ! -f "$TEMP_DIR/$video" ]; then
+        echo "   ❌ ファイルが見つかりません"
         ((failed++))
         continue
     fi
