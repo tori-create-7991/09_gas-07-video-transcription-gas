@@ -1,8 +1,23 @@
 services:
+  # ローカルファイル変換（従来の方法）
   converter:
     build: .
     volumes:
-      # 変換したいMP4ファイルを置くフォルダ
       - ./input:/input
-      # 変換後のM4Aファイルが出力されるフォルダ
       - ./output:/output
+
+  # Google Drive連携変換
+  drive-converter:
+    build:
+      context: .
+      dockerfile: Dockerfile.drive
+    volumes:
+      # サービスアカウントの認証ファイル
+      - ./credentials:/app/credentials:ro
+    environment:
+      # 動画があるDriveフォルダID
+      - INPUT_FOLDER_ID=${INPUT_FOLDER_ID}
+      # M4Aを保存するDriveフォルダID
+      - OUTPUT_FOLDER_ID=${OUTPUT_FOLDER_ID}
+      # 既存ファイルをスキップするか
+      - SKIP_EXISTING=true
