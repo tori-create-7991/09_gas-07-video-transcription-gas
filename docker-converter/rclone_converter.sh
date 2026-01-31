@@ -33,23 +33,29 @@ if [ -z "$INPUT_FOLDER" ] || [ -z "$OUTPUT_FOLDER" ]; then
     echo "❌ 環境変数が設定されていません"
     echo ""
     echo ".envファイルに以下を設定してください:"
-    echo "  INPUT_FOLDER=フォルダパス（例: 動画/会議録画）"
-    echo "  OUTPUT_FOLDER=フォルダパス（例: 音声/変換済み）"
+    echo "  INPUT_FOLDER=フォルダID"
+    echo "  OUTPUT_FOLDER=フォルダID"
     echo ""
-    echo "※ フォルダIDではなく、Driveでのパスを指定します"
+    echo "※ URLではなく、フォルダIDを指定します"
+    echo "   例: 1pi9EvAkCyMBvdnF3FhlNtX_A1srzC8Nl"
     exit 1
 fi
 
-echo "📁 入力: ${REMOTE_NAME}:${INPUT_FOLDER}"
-echo "📁 出力: ${REMOTE_NAME}:${OUTPUT_FOLDER}"
+# フォルダIDの形式でrcloneパスを構築
+# --drive-root-folder-id オプションを使用
+INPUT_PATH="${REMOTE_NAME}:,drive-root-folder-id=${INPUT_FOLDER}"
+OUTPUT_PATH="${REMOTE_NAME}:,drive-root-folder-id=${OUTPUT_FOLDER}"
+
+echo "📁 入力フォルダID: ${INPUT_FOLDER}"
+echo "📁 出力フォルダID: ${OUTPUT_FOLDER}"
 echo ""
 
 # 一時ディレクトリ作成
 mkdir -p "$TEMP_DIR"
 
-# 動画ファイル一覧を取得
+# 動画ファイル一覧を取得（フォルダIDを直接指定）
 echo "🔍 動画ファイルを検索中..."
-videos=$(rclone lsf "${REMOTE_NAME}:${INPUT_FOLDER}" --include "*.mp4" --include "*.MP4" --include "*.mov" --include "*.MOV" --include "*.webm" 2>/dev/null || true)
+videos=$(rclone lsf "${REMOTE_NAME}:" --drive-root-folder-id="${INPUT_FOLDER}" --include "*.mp4" --include "*.MP4" --include "*.mov" --include "*.MOV" --include "*.webm" 2>/dev/null || true)
 
 if [ -z "$videos" ]; then
     echo "   動画ファイルが見つかりません"
@@ -74,7 +80,7 @@ while IFS= read -r video; do
     echo "🎬 $video"
 
     # 既存ファイルチェック
-    if rclone lsf "${REMOTE_NAME}:${OUTPUT_FOLDER}/${output_name}" &>/dev/null; then
+    if rclone lsf "${REMOTE_NAME}:" --drive-root-folder-id="${OUTPUT_FOLDER}" --include "${output_name}" 2>/dev/null | grep -q "${output_name}"; then
         echo "   ⏭️  スキップ（既に存在）"
         ((skipped++))
         continue
@@ -82,7 +88,7 @@ while IFS= read -r video; do
 
     # ダウンロード
     echo "   ⬇️  ダウンロード中..."
-    if ! rclone copy "${REMOTE_NAME}:${INPUT_FOLDER}/${video}" "$TEMP_DIR/" --progress 2>&1 | grep -E "Transferred:|ETA"; then
+    if ! rclone copy "${REMOTE_NAME}:${video}" "$TEMP_DIR/" --drive-root-folder-id="${INPUT_FOLDER}" --progress 2>&1 | tail -1; then
         echo "   ❌ ダウンロード失敗"
         ((failed++))
         continue
@@ -110,7 +116,7 @@ while IFS= read -r video; do
 
     # アップロード
     echo "   ⬆️  アップロード中..."
-    if ! rclone copy "$output_path" "${REMOTE_NAME}:${OUTPUT_FOLDER}/" --progress 2>&1 | grep -E "Transferred:|ETA"; then
+    if ! rclone copy "$output_path" "${REMOTE_NAME}:" --drive-root-folder-id="${OUTPUT_FOLDER}" --progress 2>&1 | tail -1; then
         echo "   ❌ アップロード失敗"
         ((failed++))
     else
