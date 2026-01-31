@@ -18,7 +18,7 @@ services:
       context: .
       dockerfile: Dockerfile.rclone
     volumes:
-      - ./rclone-config:/root/.config/rclone
+      - ${PWD}/rclone-config:/root/.config/rclone
     entrypoint: ["rclone", "config"]
     stdin_open: true
     tty: true
@@ -29,7 +29,7 @@ services:
       context: .
       dockerfile: Dockerfile.rclone
     volumes:
-      - ./rclone-config:/root/.config/rclone
+      - ${PWD}/rclone-config:/root/.config/rclone
     environment:
       - INPUT_FOLDER=${INPUT_FOLDER}
       - OUTPUT_FOLDER=${OUTPUT_FOLDER}
