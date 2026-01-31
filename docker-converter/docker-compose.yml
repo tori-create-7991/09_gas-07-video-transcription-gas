@@ -6,14 +6,25 @@ services:
       - ./input:/input
       - ./output:/output
 
+  # OAuth認証セットアップ（初回のみ実行）
+  oauth-setup:
+    build:
+      context: .
+      dockerfile: Dockerfile.drive
+    volumes:
+      - ./credentials:/app/credentials
+    entrypoint: ["python", "oauth_setup.py"]
+    stdin_open: true
+    tty: true
+
   # Google Drive連携変換
   drive-converter:
     build:
       context: .
       dockerfile: Dockerfile.drive
     volumes:
-      # サービスアカウントの認証ファイル
-      - ./credentials:/app/credentials:ro
+      # 認証ファイル（トークン更新のため読み書き可能）
+      - ./credentials:/app/credentials
     environment:
       # 動画があるDriveフォルダID
       - INPUT_FOLDER_ID=${INPUT_FOLDER_ID}

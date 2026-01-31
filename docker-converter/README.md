@@ -49,13 +49,68 @@ docker compose up converter --build
 
 Google Driveから動画を取得 → 変換 → Driveにアップロード を自動で行います。
 
-### 必要なもの
+### 認証方法の選択
 
-- Docker / Docker Compose
-- GCPプロジェクト
-- サービスアカウント
+| 方法 | メリット | 設定の手間 |
+|------|---------|-----------|
+| **OAuth認証（おすすめ）** | 自分のDriveに直接アクセス、フォルダ共有不要 | 簡単 |
+| サービスアカウント | 自動実行向き、共有ドライブ対応 | やや複雑 |
 
-### セットアップ
+---
+
+### 方法1: OAuth認証（おすすめ）
+
+自分のGoogleアカウントで認証する方法です。フォルダ共有が不要で簡単です。
+
+#### 1. GCPでOAuthクライアントを作成
+
+1. [GCP Console](https://console.cloud.google.com/) にアクセス
+2. プロジェクトを選択（または新規作成）
+3. 「APIとサービス」→「ライブラリ」
+4. 「Google Drive API」を検索して**有効化**
+5. 「APIとサービス」→「OAuth同意画面」
+   - ユーザータイプ: 「外部」
+   - アプリ名、メールを入力して保存
+   - テストユーザーに自分のメールを追加
+6. 「APIとサービス」→「認証情報」
+7. 「認証情報を作成」→「OAuthクライアントID」
+8. アプリケーションの種類: **デスクトップアプリ**
+9. JSONをダウンロード → `credentials/client_secret.json` として保存
+
+#### 2. 環境変数を設定
+
+```bash
+cd docker-converter
+cp .env.example .env
+```
+
+`.env` を編集：
+
+```
+INPUT_FOLDER_ID=動画があるフォルダのID
+OUTPUT_FOLDER_ID=M4Aを保存するフォルダのID
+```
+
+#### 3. OAuth認証を実行（初回のみ）
+
+```bash
+docker compose run --rm oauth-setup
+```
+
+表示されるURLをブラウザで開いて、Googleアカウントで認証します。
+認証後に表示されるコードをターミナルに貼り付けてください。
+
+#### 4. 変換を実行
+
+```bash
+docker compose up drive-converter --build
+```
+
+---
+
+### 方法2: サービスアカウント
+
+自動実行や共有ドライブで使う場合はこちら。
 
 #### 1. GCPでサービスアカウントを作成
 
@@ -85,15 +140,7 @@ cd docker-converter
 cp .env.example .env
 ```
 
-`.env` を編集：
-
-```
-INPUT_FOLDER_ID=動画があるフォルダのID
-OUTPUT_FOLDER_ID=M4Aを保存するフォルダのID
-```
-
-フォルダIDは、DriveフォルダのURLから取得：
-`https://drive.google.com/drive/folders/XXXXXX` の `XXXXXX` 部分
+`.env` を編集してフォルダIDを設定
 
 #### 4. 変換を実行
 
@@ -101,7 +148,9 @@ OUTPUT_FOLDER_ID=M4Aを保存するフォルダのID
 docker compose up drive-converter --build
 ```
 
-### 実行例
+---
+
+## 実行例
 
 ```
 ===================================
@@ -109,6 +158,7 @@ docker compose up drive-converter --build
 ===================================
 
 🔗 Google Driveに接続中...
+   認証方式: OAuth（個人アカウント）
    ✅ 接続成功
 
 📁 フォルダをスキャン中...
@@ -149,6 +199,14 @@ docker compose up drive-converter --build
 ---
 
 ## トラブルシューティング
+
+### OAuth認証でエラーが出る
+
+```
+❌ エラー: access_denied
+```
+
+→ GCPの「OAuth同意画面」でテストユーザーに自分のメールを追加してください
 
 ### サービスアカウントのアクセス権エラー
 

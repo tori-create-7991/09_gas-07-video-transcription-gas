@@ -9,9 +9,12 @@ import os
 import sys
 import subprocess
 import tempfile
+import json
 from pathlib import Path
 
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import io
@@ -26,21 +29,69 @@ SUPPORTED_VIDEO_TYPES = [
 
 # 設定
 SCOPES = ['https://www.googleapis.com/auth/drive']
+CREDENTIALS_DIR = '/app/credentials'
 
 
 def get_drive_service():
-    """Drive APIサービスを取得"""
-    creds_file = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', '/app/credentials.json')
+    """Drive APIサービスを取得（OAuth優先、なければサービスアカウント）"""
+    credentials = None
 
-    if not os.path.exists(creds_file):
-        print(f"❌ 認証ファイルが見つかりません: {creds_file}")
-        print("   サービスアカウントのJSONキーを credentials.json として配置してください")
-        sys.exit(1)
+    # 1. OAuthトークンを試す
+    token_file = os.path.join(CREDENTIALS_DIR, 'token.json')
+    if os.path.exists(token_file):
+        try:
+            with open(token_file, 'r') as f:
+                token_data = json.load(f)
 
-    credentials = service_account.Credentials.from_service_account_file(
-        creds_file, scopes=SCOPES
-    )
-    return build('drive', 'v3', credentials=credentials)
+            credentials = Credentials(
+                token=token_data.get('token'),
+                refresh_token=token_data.get('refresh_token'),
+                token_uri=token_data.get('token_uri'),
+                client_id=token_data.get('client_id'),
+                client_secret=token_data.get('client_secret'),
+                scopes=token_data.get('scopes')
+            )
+
+            # トークンが期限切れなら更新
+            if credentials.expired and credentials.refresh_token:
+                credentials.refresh(Request())
+                # 更新したトークンを保存
+                token_data['token'] = credentials.token
+                with open(token_file, 'w') as f:
+                    json.dump(token_data, f, indent=2)
+
+            print("   認証方式: OAuth（個人アカウント）")
+            return build('drive', 'v3', credentials=credentials)
+
+        except Exception as e:
+            print(f"   ⚠️ OAuthトークンエラー: {e}")
+
+    # 2. サービスアカウントを試す
+    sa_file = os.path.join(CREDENTIALS_DIR, 'credentials.json')
+    if os.path.exists(sa_file):
+        try:
+            credentials = service_account.Credentials.from_service_account_file(
+                sa_file, scopes=SCOPES
+            )
+            print("   認証方式: サービスアカウント")
+            return build('drive', 'v3', credentials=credentials)
+        except Exception as e:
+            print(f"   ⚠️ サービスアカウントエラー: {e}")
+
+    # どちらもない場合
+    print("❌ 認証ファイルが見つかりません")
+    print()
+    print("以下のいずれかを設定してください:")
+    print()
+    print("【方法1】OAuth認証（個人アカウント）- おすすめ")
+    print("  1. docker compose run --rm oauth-setup")
+    print("  2. ブラウザで認証")
+    print()
+    print("【方法2】サービスアカウント")
+    print("  1. GCPでサービスアカウント作成")
+    print("  2. credentials/credentials.json に配置")
+    print("  3. Driveフォルダをサービスアカウントに共有")
+    sys.exit(1)
 
 
 def list_video_files(service, folder_id):
