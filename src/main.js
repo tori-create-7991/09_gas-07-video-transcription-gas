@@ -606,18 +606,22 @@ function combineAllDocs() {
     return;
   }
 
-  // 統合ドキュメントの名前
-  const combinedDocName = '📚 統合文字起こし_' + new Date().toLocaleString('ja-JP', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).replace(/\//g, '-').replace(/:/g, '-').replace(' ', '_');
+  // 統合ドキュメントの名前（固定）
+  const combinedDocName = '📚 統合文字起こし';
 
-  // 新規ドキュメント作成
-  const combinedDoc = DocumentApp.create(combinedDocName);
-  DriveApp.getFileById(combinedDoc.getId()).moveTo(outputFolder);
+  // 既存の統合ドキュメントを確認
+  const existingFiles = outputFolder.getFilesByName(combinedDocName);
+  let combinedDoc;
+
+  if (existingFiles.hasNext()) {
+    // 既存ドキュメントを上書き
+    combinedDoc = DocumentApp.openById(existingFiles.next().getId());
+    combinedDoc.getBody().clear();
+  } else {
+    // 新規ドキュメント作成
+    combinedDoc = DocumentApp.create(combinedDocName);
+    DriveApp.getFileById(combinedDoc.getId()).moveTo(outputFolder);
+  }
 
   const body = combinedDoc.getBody();
 
