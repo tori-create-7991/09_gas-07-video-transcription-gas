@@ -36,13 +36,16 @@ const SUPPORTED_MIME_TYPES = [
 ];
 
 // ファイルサイズ制限（バイト）
-// チャンクアップロードにより200MBまで対応
-const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024; // 200MB
-const MAX_FILE_SIZE_MB = 200;
+// GASのUrlFetchApp制限を考慮して50MBに設定
+// Blobを直接使用することでメモリ効率を改善
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_FILE_SIZE_MB = 50;
 
-// チャンクアップロード設定
-// GASのUrlFetchApp制限を考慮して32MBチャンクに設定
-const CHUNK_SIZE_BYTES = 32 * 1024 * 1024; // 32MB
+// 分割文字起こし設定
+// 20分ごとに分割（長時間音声対応）
+const SEGMENT_DURATION_MINUTES = 20;
+// 推定ビットレート（128kbps = 1分あたり約1MB）
+const ESTIMATED_BITRATE_MB_PER_MIN = 1;
 
 // Geminiファイル処理のポーリング設定
 const GEMINI_POLLING_INTERVAL_MS = 5000;  // 5秒間隔
@@ -446,11 +449,11 @@ function processRow(sheet, rowNum, fileId, fileName, config) {
 
     const file = DriveApp.getFileById(fileId);
 
-    // ファイルサイズチェック
+    // ファイルサイズチェック（GASのアップロード制限）
     const fileSize = file.getSize();
     if (fileSize > MAX_FILE_SIZE_BYTES) {
       const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
-      throw new Error(`ファイルサイズが大きすぎます（${fileSizeMB}MB）。${MAX_FILE_SIZE_MB}MB以下に変換してください。docker-converterを使用するか、音声のみを抽出してください。`);
+      throw new Error(`ファイルサイズが大きすぎます（${fileSizeMB}MB）。GASの制限により${MAX_FILE_SIZE_MB}MB以下にする必要があります。docker-converterで圧縮するか、音声のみを抽出してください。`);
     }
 
     const transcript = transcribeWithGemini(file, config.GEMINI_API_KEY);
@@ -474,7 +477,7 @@ function processRow(sheet, rowNum, fileId, fileName, config) {
 // ============================================================
 
 /**
- * Geminiで文字起こし
+ * Geminiで文字起こし（長時間音声は自動分割）
  */
 function transcribeWithGemini(file, apiKey) {
   const uploadResult = uploadFileToGemini(file, apiKey);
@@ -482,6 +485,26 @@ function transcribeWithGemini(file, apiKey) {
   // ファイルがACTIVE状態になるまでポーリング
   const activeFileUri = waitForFileActive(uploadResult.fileName, apiKey);
 
+  // ファイルサイズから推定再生時間を計算
+  const fileSizeMB = file.getSize() / (1024 * 1024);
+  const estimatedMinutes = fileSizeMB / ESTIMATED_BITRATE_MB_PER_MIN;
+
+  console.log(`推定再生時間: ${estimatedMinutes.toFixed(1)}分`);
+
+  // 短い音声は通常処理
+  if (estimatedMinutes <= SEGMENT_DURATION_MINUTES) {
+    return transcribeFull(file.getMimeType(), activeFileUri, apiKey);
+  }
+
+  // 長い音声は分割処理
+  console.log(`長時間音声のため分割文字起こしを実行`);
+  return transcribeInSegments(file.getMimeType(), activeFileUri, estimatedMinutes, apiKey);
+}
+
+/**
+ * 通常の文字起こし（短い音声用）
+ */
+function transcribeFull(mimeType, fileUri, apiKey) {
   const response = UrlFetchApp.fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
@@ -491,7 +514,7 @@ function transcribeWithGemini(file, apiKey) {
       payload: JSON.stringify({
         contents: [{
           parts: [
-            { fileData: { mimeType: file.getMimeType(), fileUri: activeFileUri }},
+            { fileData: { mimeType: mimeType, fileUri: fileUri }},
             { text: `このメディアファイルの音声を全て文字起こししてください。
 
 【ルール】
@@ -510,6 +533,70 @@ function transcribeWithGemini(file, apiKey) {
   const result = JSON.parse(response.getContentText());
   if (result.error) throw new Error(result.error.message);
   return result.candidates[0].content.parts[0].text;
+}
+
+/**
+ * 分割文字起こし（長時間音声用）
+ */
+function transcribeInSegments(mimeType, fileUri, estimatedMinutes, apiKey) {
+  const segmentCount = Math.ceil(estimatedMinutes / SEGMENT_DURATION_MINUTES);
+  const transcripts = [];
+
+  console.log(`${segmentCount}セグメントに分割して文字起こし`);
+
+  for (let i = 0; i < segmentCount; i++) {
+    const startMin = i * SEGMENT_DURATION_MINUTES;
+    const endMin = Math.min((i + 1) * SEGMENT_DURATION_MINUTES, Math.ceil(estimatedMinutes));
+
+    console.log(`セグメント ${i + 1}/${segmentCount}: ${startMin}分〜${endMin}分`);
+
+    const prompt = `このメディアファイルの音声を文字起こししてください。
+
+【対象範囲】
+${startMin}分から${endMin}分までの部分のみを文字起こししてください。
+それ以外の部分は無視してください。
+
+【ルール】
+- 話者が複数いる場合は「話者A:」「話者B:」と区別
+- タイムスタンプ不要
+- 聞き取れない部分は[不明]
+- 句読点を入れて読みやすく
+- 文字起こしのみ出力（説明や注釈は不要）`;
+
+    const response = UrlFetchApp.fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'post',
+        contentType: 'application/json',
+        muteHttpExceptions: true,
+        payload: JSON.stringify({
+          contents: [{
+            parts: [
+              { fileData: { mimeType: mimeType, fileUri: fileUri }},
+              { text: prompt }
+            ]
+          }],
+          generationConfig: { maxOutputTokens: 8192 }
+        })
+      }
+    );
+
+    const result = JSON.parse(response.getContentText());
+    if (result.error) {
+      console.log(`セグメント ${i + 1} エラー: ${result.error.message}`);
+      transcripts.push(`[${startMin}分〜${endMin}分: エラー - ${result.error.message}]`);
+    } else {
+      const text = result.candidates[0].content.parts[0].text;
+      transcripts.push(text);
+    }
+
+    // レート制限対策
+    if (i < segmentCount - 1) {
+      Utilities.sleep(2000);
+    }
+  }
+
+  return transcripts.join('\n\n---\n\n');
 }
 
 /**
@@ -548,14 +635,13 @@ function waitForFileActive(fileName, apiKey) {
 }
 
 /**
- * Gemini File APIにアップロード（チャンク分割対応）
+ * Gemini File APIにアップロード（Blob直接使用でメモリ効率改善）
  * @returns {Object} { uri: string, fileName: string }
  */
 function uploadFileToGemini(file, apiKey) {
   const blob = file.getBlob();
-  const bytes = blob.getBytes();
-  const totalSize = bytes.length;
-  const fileSizeMB = (totalSize / (1024 * 1024)).toFixed(1);
+  const fileSize = file.getSize();
+  const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
 
   console.log(`アップロード開始: ${file.getName()} (${fileSizeMB}MB)`);
 
@@ -567,7 +653,7 @@ function uploadFileToGemini(file, apiKey) {
       headers: {
         'X-Goog-Upload-Protocol': 'resumable',
         'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': totalSize,
+        'X-Goog-Upload-Header-Content-Length': fileSize,
         'X-Goog-Upload-Header-Content-Type': file.getMimeType()
       },
       payload: JSON.stringify({ file: { displayName: file.getName() }}),
@@ -587,27 +673,15 @@ function uploadFileToGemini(file, apiKey) {
     throw new Error('アップロードURLを取得できませんでした');
   }
 
-  // 小さいファイルは一括アップロード
-  if (totalSize <= CHUNK_SIZE_BYTES) {
-    return uploadSingleChunk(uploadUrl, bytes, file.getMimeType());
-  }
-
-  // 大きいファイルはチャンク分割アップロード
-  return uploadInChunks(uploadUrl, bytes, file.getMimeType());
-}
-
-/**
- * 一括アップロード（小さいファイル用）
- */
-function uploadSingleChunk(uploadUrl, bytes, mimeType) {
+  // Blobを直接使用してアップロード（getBytes()を避けてメモリ節約）
   const uploadResponse = UrlFetchApp.fetch(uploadUrl, {
     method: 'post',
     headers: {
       'X-Goog-Upload-Command': 'upload, finalize',
       'X-Goog-Upload-Offset': '0',
-      'Content-Type': mimeType
+      'Content-Type': file.getMimeType()
     },
-    payload: bytes,
+    payload: blob,
     muteHttpExceptions: true
   });
 
@@ -622,69 +696,6 @@ function uploadSingleChunk(uploadUrl, bytes, mimeType) {
     uri: result.file.uri,
     fileName: result.file.name
   };
-}
-
-/**
- * チャンク分割アップロード（大きいファイル用）
- */
-function uploadInChunks(uploadUrl, bytes, mimeType) {
-  const totalSize = bytes.length;
-  const totalChunks = Math.ceil(totalSize / CHUNK_SIZE_BYTES);
-  let offset = 0;
-
-  console.log(`チャンク分割アップロード: ${totalChunks}チャンク`);
-
-  for (let chunkNum = 0; chunkNum < totalChunks; chunkNum++) {
-    const isLastChunk = (chunkNum === totalChunks - 1);
-    const chunkEnd = Math.min(offset + CHUNK_SIZE_BYTES, totalSize);
-    const chunkBytes = bytes.slice(offset, chunkEnd);
-
-    const command = isLastChunk ? 'upload, finalize' : 'upload';
-
-    console.log(`チャンク ${chunkNum + 1}/${totalChunks} アップロード中... (${offset}-${chunkEnd - 1}/${totalSize})`);
-
-    const uploadResponse = UrlFetchApp.fetch(uploadUrl, {
-      method: 'post',
-      headers: {
-        'X-Goog-Upload-Command': command,
-        'X-Goog-Upload-Offset': String(offset),
-        'Content-Type': mimeType
-      },
-      payload: chunkBytes,
-      muteHttpExceptions: true
-    });
-
-    const responseCode = uploadResponse.getResponseCode();
-
-    if (isLastChunk) {
-      // 最後のチャンク: 200を期待
-      if (responseCode !== 200) {
-        throw new Error(`最終チャンクアップロードエラー: ${uploadResponse.getContentText()}`);
-      }
-
-      const result = JSON.parse(uploadResponse.getContentText());
-      console.log(`アップロード完了: ${result.file.name}`);
-
-      return {
-        uri: result.file.uri,
-        fileName: result.file.name
-      };
-    } else {
-      // 途中のチャンク: 200を期待（resumableなので継続可能）
-      if (responseCode !== 200) {
-        throw new Error(`チャンク${chunkNum + 1}アップロードエラー: ${uploadResponse.getContentText()}`);
-      }
-    }
-
-    offset = chunkEnd;
-
-    // チャンク間で少し待機（レート制限対策）
-    if (!isLastChunk) {
-      Utilities.sleep(500);
-    }
-  }
-
-  throw new Error('チャンクアップロードが予期せず終了しました');
 }
 
 // ============================================================
