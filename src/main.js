@@ -35,6 +35,15 @@ const SUPPORTED_MIME_TYPES = [
   'video/webm'        // webm video
 ];
 
+// ファイルサイズ制限（バイト）
+// GASのUrlFetchApp制限とメモリ制限を考慮して50MBに設定
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_FILE_SIZE_MB = 50;
+
+// Geminiファイル処理のポーリング設定
+const GEMINI_POLLING_INTERVAL_MS = 5000;  // 5秒間隔
+const GEMINI_POLLING_MAX_ATTEMPTS = 60;   // 最大60回（5分）
+
 // ============================================================
 // 設定管理
 // ============================================================
@@ -432,6 +441,14 @@ function processRow(sheet, rowNum, fileId, fileName, config) {
     SpreadsheetApp.flush();
 
     const file = DriveApp.getFileById(fileId);
+
+    // ファイルサイズチェック
+    const fileSize = file.getSize();
+    if (fileSize > MAX_FILE_SIZE_BYTES) {
+      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+      throw new Error(`ファイルサイズが大きすぎます（${fileSizeMB}MB）。${MAX_FILE_SIZE_MB}MB以下に変換してください。docker-converterを使用するか、音声のみを抽出してください。`);
+    }
+
     const transcript = transcribeWithGemini(file, config.GEMINI_API_KEY);
     const docUrl = saveAsGoogleDoc(fileName, transcript, config.OUTPUT_FOLDER_ID);
 
@@ -456,8 +473,10 @@ function processRow(sheet, rowNum, fileId, fileName, config) {
  * Geminiで文字起こし
  */
 function transcribeWithGemini(file, apiKey) {
-  const fileUri = uploadFileToGemini(file, apiKey);
-  Utilities.sleep(5000);
+  const uploadResult = uploadFileToGemini(file, apiKey);
+
+  // ファイルがACTIVE状態になるまでポーリング
+  const activeFileUri = waitForFileActive(uploadResult.fileName, apiKey);
 
   const response = UrlFetchApp.fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
@@ -468,7 +487,7 @@ function transcribeWithGemini(file, apiKey) {
       payload: JSON.stringify({
         contents: [{
           parts: [
-            { fileData: { mimeType: file.getMimeType(), fileUri: fileUri }},
+            { fileData: { mimeType: file.getMimeType(), fileUri: activeFileUri }},
             { text: `このメディアファイルの音声を全て文字起こししてください。
 
 【ルール】
@@ -490,10 +509,50 @@ function transcribeWithGemini(file, apiKey) {
 }
 
 /**
+ * Geminiファイルがアクティブになるまで待機
+ */
+function waitForFileActive(fileName, apiKey) {
+  for (let attempt = 0; attempt < GEMINI_POLLING_MAX_ATTEMPTS; attempt++) {
+    const response = UrlFetchApp.fetch(
+      `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`,
+      {
+        method: 'get',
+        muteHttpExceptions: true
+      }
+    );
+
+    const result = JSON.parse(response.getContentText());
+
+    if (result.error) {
+      throw new Error(`ファイル状態確認エラー: ${result.error.message}`);
+    }
+
+    const state = result.state;
+    console.log(`ファイル状態: ${state} (試行 ${attempt + 1}/${GEMINI_POLLING_MAX_ATTEMPTS})`);
+
+    if (state === 'ACTIVE') {
+      return result.uri;
+    } else if (state === 'FAILED') {
+      throw new Error('Geminiでのファイル処理に失敗しました。ファイル形式を確認してください。');
+    }
+
+    // PROCESSING状態の場合は待機して再試行
+    Utilities.sleep(GEMINI_POLLING_INTERVAL_MS);
+  }
+
+  throw new Error(`ファイル処理がタイムアウトしました（${GEMINI_POLLING_MAX_ATTEMPTS * GEMINI_POLLING_INTERVAL_MS / 1000}秒）。ファイルが大きすぎる可能性があります。`);
+}
+
+/**
  * Gemini File APIにアップロード
+ * @returns {Object} { uri: string, fileName: string }
  */
 function uploadFileToGemini(file, apiKey) {
-  const bytes = file.getBlob().getBytes();
+  // Blobを直接使用してメモリ効率を改善
+  const blob = file.getBlob();
+  const bytes = blob.getBytes();
+
+  console.log(`アップロード開始: ${file.getName()} (${(bytes.length / (1024 * 1024)).toFixed(1)}MB)`);
 
   const startResponse = UrlFetchApp.fetch(
     `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
@@ -506,12 +565,21 @@ function uploadFileToGemini(file, apiKey) {
         'X-Goog-Upload-Header-Content-Type': file.getMimeType()
       },
       payload: JSON.stringify({ file: { displayName: file.getName() }}),
-      contentType: 'application/json'
+      contentType: 'application/json',
+      muteHttpExceptions: true
     }
   );
 
+  if (startResponse.getResponseCode() !== 200) {
+    throw new Error(`アップロード開始エラー: ${startResponse.getContentText()}`);
+  }
+
   const uploadUrl = startResponse.getHeaders()['x-goog-upload-url']
                  || startResponse.getHeaders()['X-Goog-Upload-URL'];
+
+  if (!uploadUrl) {
+    throw new Error('アップロードURLを取得できませんでした');
+  }
 
   const uploadResponse = UrlFetchApp.fetch(uploadUrl, {
     method: 'post',
@@ -520,10 +588,21 @@ function uploadFileToGemini(file, apiKey) {
       'X-Goog-Upload-Offset': '0',
       'Content-Type': file.getMimeType()
     },
-    payload: bytes
+    payload: bytes,
+    muteHttpExceptions: true
   });
 
-  return JSON.parse(uploadResponse.getContentText()).file.uri;
+  if (uploadResponse.getResponseCode() !== 200) {
+    throw new Error(`アップロードエラー: ${uploadResponse.getContentText()}`);
+  }
+
+  const result = JSON.parse(uploadResponse.getContentText());
+  console.log(`アップロード完了: ${result.file.name}`);
+
+  return {
+    uri: result.file.uri,
+    fileName: result.file.name
+  };
 }
 
 // ============================================================
