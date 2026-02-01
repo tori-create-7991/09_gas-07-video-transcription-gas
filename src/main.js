@@ -41,8 +41,8 @@ const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024; // 200MB
 const MAX_FILE_SIZE_MB = 200;
 
 // チャンクアップロード設定
-// GASのUrlFetchApp制限を考慮して8MBチャンクに設定
-const CHUNK_SIZE_BYTES = 8 * 1024 * 1024; // 8MB
+// GASのUrlFetchApp制限を考慮して32MBチャンクに設定
+const CHUNK_SIZE_BYTES = 32 * 1024 * 1024; // 32MB
 
 // Geminiファイル処理のポーリング設定
 const GEMINI_POLLING_INTERVAL_MS = 5000;  // 5秒間隔
