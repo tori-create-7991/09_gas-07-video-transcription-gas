@@ -36,13 +36,10 @@ const SUPPORTED_MIME_TYPES = [
 ];
 
 // ファイルサイズ制限（バイト）
-// チャンクアップロードにより200MBまで対応
-const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024; // 200MB
-const MAX_FILE_SIZE_MB = 200;
-
-// チャンクアップロード設定
-// GASのUrlFetchApp制限を考慮して32MBチャンクに設定
-const CHUNK_SIZE_BYTES = 32 * 1024 * 1024; // 32MB
+// GASのUrlFetchApp制限を考慮して50MBに設定
+// Blobを直接使用することでメモリ効率を改善
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_FILE_SIZE_MB = 50;
 
 // Geminiファイル処理のポーリング設定
 const GEMINI_POLLING_INTERVAL_MS = 5000;  // 5秒間隔
@@ -548,14 +545,13 @@ function waitForFileActive(fileName, apiKey) {
 }
 
 /**
- * Gemini File APIにアップロード（チャンク分割対応）
+ * Gemini File APIにアップロード（Blob直接使用でメモリ効率改善）
  * @returns {Object} { uri: string, fileName: string }
  */
 function uploadFileToGemini(file, apiKey) {
   const blob = file.getBlob();
-  const bytes = blob.getBytes();
-  const totalSize = bytes.length;
-  const fileSizeMB = (totalSize / (1024 * 1024)).toFixed(1);
+  const fileSize = file.getSize();
+  const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
 
   console.log(`アップロード開始: ${file.getName()} (${fileSizeMB}MB)`);
 
@@ -567,7 +563,7 @@ function uploadFileToGemini(file, apiKey) {
       headers: {
         'X-Goog-Upload-Protocol': 'resumable',
         'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': totalSize,
+        'X-Goog-Upload-Header-Content-Length': fileSize,
         'X-Goog-Upload-Header-Content-Type': file.getMimeType()
       },
       payload: JSON.stringify({ file: { displayName: file.getName() }}),
@@ -587,27 +583,15 @@ function uploadFileToGemini(file, apiKey) {
     throw new Error('アップロードURLを取得できませんでした');
   }
 
-  // 小さいファイルは一括アップロード
-  if (totalSize <= CHUNK_SIZE_BYTES) {
-    return uploadSingleChunk(uploadUrl, bytes, file.getMimeType());
-  }
-
-  // 大きいファイルはチャンク分割アップロード
-  return uploadInChunks(uploadUrl, bytes, file.getMimeType());
-}
-
-/**
- * 一括アップロード（小さいファイル用）
- */
-function uploadSingleChunk(uploadUrl, bytes, mimeType) {
+  // Blobを直接使用してアップロード（getBytes()を避けてメモリ節約）
   const uploadResponse = UrlFetchApp.fetch(uploadUrl, {
     method: 'post',
     headers: {
       'X-Goog-Upload-Command': 'upload, finalize',
       'X-Goog-Upload-Offset': '0',
-      'Content-Type': mimeType
+      'Content-Type': file.getMimeType()
     },
-    payload: bytes,
+    payload: blob,
     muteHttpExceptions: true
   });
 
@@ -622,69 +606,6 @@ function uploadSingleChunk(uploadUrl, bytes, mimeType) {
     uri: result.file.uri,
     fileName: result.file.name
   };
-}
-
-/**
- * チャンク分割アップロード（大きいファイル用）
- */
-function uploadInChunks(uploadUrl, bytes, mimeType) {
-  const totalSize = bytes.length;
-  const totalChunks = Math.ceil(totalSize / CHUNK_SIZE_BYTES);
-  let offset = 0;
-
-  console.log(`チャンク分割アップロード: ${totalChunks}チャンク`);
-
-  for (let chunkNum = 0; chunkNum < totalChunks; chunkNum++) {
-    const isLastChunk = (chunkNum === totalChunks - 1);
-    const chunkEnd = Math.min(offset + CHUNK_SIZE_BYTES, totalSize);
-    const chunkBytes = bytes.slice(offset, chunkEnd);
-
-    const command = isLastChunk ? 'upload, finalize' : 'upload';
-
-    console.log(`チャンク ${chunkNum + 1}/${totalChunks} アップロード中... (${offset}-${chunkEnd - 1}/${totalSize})`);
-
-    const uploadResponse = UrlFetchApp.fetch(uploadUrl, {
-      method: 'post',
-      headers: {
-        'X-Goog-Upload-Command': command,
-        'X-Goog-Upload-Offset': String(offset),
-        'Content-Type': mimeType
-      },
-      payload: chunkBytes,
-      muteHttpExceptions: true
-    });
-
-    const responseCode = uploadResponse.getResponseCode();
-
-    if (isLastChunk) {
-      // 最後のチャンク: 200を期待
-      if (responseCode !== 200) {
-        throw new Error(`最終チャンクアップロードエラー: ${uploadResponse.getContentText()}`);
-      }
-
-      const result = JSON.parse(uploadResponse.getContentText());
-      console.log(`アップロード完了: ${result.file.name}`);
-
-      return {
-        uri: result.file.uri,
-        fileName: result.file.name
-      };
-    } else {
-      // 途中のチャンク: 200を期待（resumableなので継続可能）
-      if (responseCode !== 200) {
-        throw new Error(`チャンク${chunkNum + 1}アップロードエラー: ${uploadResponse.getContentText()}`);
-      }
-    }
-
-    offset = chunkEnd;
-
-    // チャンク間で少し待機（レート制限対策）
-    if (!isLastChunk) {
-      Utilities.sleep(500);
-    }
-  }
-
-  throw new Error('チャンクアップロードが予期せず終了しました');
 }
 
 // ============================================================
