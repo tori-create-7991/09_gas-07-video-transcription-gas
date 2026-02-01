@@ -41,6 +41,12 @@ const SUPPORTED_MIME_TYPES = [
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 const MAX_FILE_SIZE_MB = 50;
 
+// 分割文字起こし設定
+// 20分ごとに分割（長時間音声対応）
+const SEGMENT_DURATION_MINUTES = 20;
+// 推定ビットレート（128kbps = 1分あたり約1MB）
+const ESTIMATED_BITRATE_MB_PER_MIN = 1;
+
 // Geminiファイル処理のポーリング設定
 const GEMINI_POLLING_INTERVAL_MS = 5000;  // 5秒間隔
 const GEMINI_POLLING_MAX_ATTEMPTS = 120;  // 最大120回（10分）大きなファイル対応
@@ -443,11 +449,11 @@ function processRow(sheet, rowNum, fileId, fileName, config) {
 
     const file = DriveApp.getFileById(fileId);
 
-    // ファイルサイズチェック
+    // ファイルサイズチェック（GASのアップロード制限）
     const fileSize = file.getSize();
     if (fileSize > MAX_FILE_SIZE_BYTES) {
       const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
-      throw new Error(`ファイルサイズが大きすぎます（${fileSizeMB}MB）。${MAX_FILE_SIZE_MB}MB以下に変換してください。docker-converterを使用するか、音声のみを抽出してください。`);
+      throw new Error(`ファイルサイズが大きすぎます（${fileSizeMB}MB）。GASの制限により${MAX_FILE_SIZE_MB}MB以下にする必要があります。docker-converterで圧縮するか、音声のみを抽出してください。`);
     }
 
     const transcript = transcribeWithGemini(file, config.GEMINI_API_KEY);
@@ -471,7 +477,7 @@ function processRow(sheet, rowNum, fileId, fileName, config) {
 // ============================================================
 
 /**
- * Geminiで文字起こし
+ * Geminiで文字起こし（長時間音声は自動分割）
  */
 function transcribeWithGemini(file, apiKey) {
   const uploadResult = uploadFileToGemini(file, apiKey);
@@ -479,6 +485,26 @@ function transcribeWithGemini(file, apiKey) {
   // ファイルがACTIVE状態になるまでポーリング
   const activeFileUri = waitForFileActive(uploadResult.fileName, apiKey);
 
+  // ファイルサイズから推定再生時間を計算
+  const fileSizeMB = file.getSize() / (1024 * 1024);
+  const estimatedMinutes = fileSizeMB / ESTIMATED_BITRATE_MB_PER_MIN;
+
+  console.log(`推定再生時間: ${estimatedMinutes.toFixed(1)}分`);
+
+  // 短い音声は通常処理
+  if (estimatedMinutes <= SEGMENT_DURATION_MINUTES) {
+    return transcribeFull(file.getMimeType(), activeFileUri, apiKey);
+  }
+
+  // 長い音声は分割処理
+  console.log(`長時間音声のため分割文字起こしを実行`);
+  return transcribeInSegments(file.getMimeType(), activeFileUri, estimatedMinutes, apiKey);
+}
+
+/**
+ * 通常の文字起こし（短い音声用）
+ */
+function transcribeFull(mimeType, fileUri, apiKey) {
   const response = UrlFetchApp.fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
@@ -488,7 +514,7 @@ function transcribeWithGemini(file, apiKey) {
       payload: JSON.stringify({
         contents: [{
           parts: [
-            { fileData: { mimeType: file.getMimeType(), fileUri: activeFileUri }},
+            { fileData: { mimeType: mimeType, fileUri: fileUri }},
             { text: `このメディアファイルの音声を全て文字起こししてください。
 
 【ルール】
@@ -507,6 +533,70 @@ function transcribeWithGemini(file, apiKey) {
   const result = JSON.parse(response.getContentText());
   if (result.error) throw new Error(result.error.message);
   return result.candidates[0].content.parts[0].text;
+}
+
+/**
+ * 分割文字起こし（長時間音声用）
+ */
+function transcribeInSegments(mimeType, fileUri, estimatedMinutes, apiKey) {
+  const segmentCount = Math.ceil(estimatedMinutes / SEGMENT_DURATION_MINUTES);
+  const transcripts = [];
+
+  console.log(`${segmentCount}セグメントに分割して文字起こし`);
+
+  for (let i = 0; i < segmentCount; i++) {
+    const startMin = i * SEGMENT_DURATION_MINUTES;
+    const endMin = Math.min((i + 1) * SEGMENT_DURATION_MINUTES, Math.ceil(estimatedMinutes));
+
+    console.log(`セグメント ${i + 1}/${segmentCount}: ${startMin}分〜${endMin}分`);
+
+    const prompt = `このメディアファイルの音声を文字起こししてください。
+
+【対象範囲】
+${startMin}分から${endMin}分までの部分のみを文字起こししてください。
+それ以外の部分は無視してください。
+
+【ルール】
+- 話者が複数いる場合は「話者A:」「話者B:」と区別
+- タイムスタンプ不要
+- 聞き取れない部分は[不明]
+- 句読点を入れて読みやすく
+- 文字起こしのみ出力（説明や注釈は不要）`;
+
+    const response = UrlFetchApp.fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'post',
+        contentType: 'application/json',
+        muteHttpExceptions: true,
+        payload: JSON.stringify({
+          contents: [{
+            parts: [
+              { fileData: { mimeType: mimeType, fileUri: fileUri }},
+              { text: prompt }
+            ]
+          }],
+          generationConfig: { maxOutputTokens: 8192 }
+        })
+      }
+    );
+
+    const result = JSON.parse(response.getContentText());
+    if (result.error) {
+      console.log(`セグメント ${i + 1} エラー: ${result.error.message}`);
+      transcripts.push(`[${startMin}分〜${endMin}分: エラー - ${result.error.message}]`);
+    } else {
+      const text = result.candidates[0].content.parts[0].text;
+      transcripts.push(text);
+    }
+
+    // レート制限対策
+    if (i < segmentCount - 1) {
+      Utilities.sleep(2000);
+    }
+  }
+
+  return transcripts.join('\n\n---\n\n');
 }
 
 /**
